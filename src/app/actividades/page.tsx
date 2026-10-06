@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Modal } from "@/components/Modal";
 import { ProjectForm } from "@/components/ProjectForm";
 import { ProjectSelect } from "@/components/ProjectSelect";
+import { exportMonthToExcel, monthLabel, recentMonths } from "@/lib/exportMonth";
 import {
   formatHours, formatMoney, localISODate, toActivity, toProject,
   type Activity, type Project,
@@ -51,12 +52,16 @@ export default function ActivitiesPage() {
 
   const [quickTarget, setQuickTarget] = useState<QuickTarget | null>(null);
 
+  const months = useMemo(() => recentMonths(), []);
+  const [exportMonth, setExportMonth] = useState(months[0]);
+  const [exporting, setExporting] = useState(false);
+
   // Fila de captura
   const [entryDate, setEntryDate] = useState(localISODate());
   const [entryProject, setEntryProject] = useState<string | null>(null);
   const [entryDescription, setEntryDescription] = useState("");
   const [entryHours, setEntryHours] = useState("");
-  const descriptionRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     supabase.from("projects").select("*").order("name").then(({ data, error }) => {
@@ -163,16 +168,37 @@ export default function ActivitiesPage() {
     setQuickTarget(null);
   }
 
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const ok = await exportMonthToExcel(supabase, exportMonth, projects);
+      if (!ok) setError("No hay actividades en ese mes.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo generar el Excel.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function selectRange(key: RangeKey) {
     setRangeKey(key);
     if (key !== "custom") setRange(rangeFor(key));
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
+    <div className="grid gap-6 xl:grid-cols-[1fr_260px]">
       <section className="min-w-0">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <h1 className="mr-auto text-2xl font-semibold tracking-tight">Actividades</h1>
+          <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-white p-0.5">
+            <select aria-label="Mes a descargar" className="input w-auto border-0 py-1"
+              value={exportMonth} onChange={(e) => setExportMonth(e.target.value)}>
+              {months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+            </select>
+            <button className="btn-primary" onClick={handleExport} disabled={exporting}>
+              {exporting ? "Generando..." : "Descargar Excel"}
+            </button>
+          </div>
           <button className="btn-ghost border border-slate-200 bg-white" onClick={() => setQuickTarget({ kind: "entry" })}>
             + Proyecto rápido
           </button>
@@ -209,20 +235,20 @@ export default function ActivitiesPage() {
         )}
 
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[860px] table-fixed text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="w-36 px-3 py-2 font-medium">Fecha</th>
-                <th className="w-52 px-3 py-2 font-medium">Proyecto</th>
+                <th className="w-[9.5rem] px-3 py-2 font-medium">Fecha</th>
+                <th className="w-48 px-3 py-2 font-medium">Proyecto</th>
                 <th className="px-3 py-2 font-medium">Actividad</th>
-                <th className="w-24 px-3 py-2 text-right font-medium">Horas</th>
+                <th className="w-[4.5rem] px-2 py-2 text-right font-medium">Horas</th>
                 <th className="w-28 px-3 py-2 text-right font-medium">Monto</th>
                 <th className="w-10" />
               </tr>
             </thead>
             <tbody>
               {/* Fila de captura rápida */}
-              <tr className="border-b border-slate-200 bg-indigo-50/40">
+              <tr className="border-b border-slate-200 bg-indigo-50/40 align-top">
                 <td className="px-2 py-2">
                   <input form="entry" type="date" required className="input" value={entryDate}
                     onChange={(e) => setEntryDate(e.target.value)} />
@@ -232,14 +258,21 @@ export default function ActivitiesPage() {
                     onCreateNew={() => setQuickTarget({ kind: "entry" })} />
                 </td>
                 <td className="px-2 py-2">
-                  <input form="entry" ref={descriptionRef} className="input" placeholder="¿Qué hiciste?"
-                    value={entryDescription} onChange={(e) => setEntryDescription(e.target.value)} />
+                  <textarea form="entry" ref={descriptionRef} rows={1}
+                    className="input field-sizing-content min-h-[34px] resize-none" placeholder="¿Qué hiciste? (Shift+Enter para nueva línea)"
+                    value={entryDescription} onChange={(e) => setEntryDescription(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        e.currentTarget.form?.requestSubmit();
+                      }
+                    }} />
                 </td>
                 <td className="px-2 py-2">
                   <input form="entry" type="number" min="0" step="0.25" className="input text-right" placeholder="0"
                     value={entryHours} onChange={(e) => setEntryHours(e.target.value)} />
                 </td>
-                <td className="px-2 py-2 text-right text-slate-400">
+                <td className="px-2 py-3.5 text-right text-slate-400">
                   {entryProject && entryHours
                     ? formatMoney(Number(entryHours) * projectsById[entryProject].hourly_rate, projectsById[entryProject].currency)
                     : "—"}
@@ -274,7 +307,7 @@ export default function ActivitiesPage() {
         </div>
       </section>
 
-      <aside className="h-fit rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:sticky lg:top-6">
+      <aside className="h-fit rounded-xl border border-slate-200 bg-white p-5 shadow-sm xl:sticky xl:top-6">
         <h2 className="text-sm font-semibold text-slate-700">Resumen del periodo</h2>
         <p className="text-xs text-slate-500">{range.from} → {range.to}</p>
         <div className="mt-4 space-y-3">
@@ -335,7 +368,7 @@ function ActivityRow({ activity, project, projects, onUpdate, onDelete, onCreate
   const cell = "input border-transparent bg-transparent hover:border-slate-200 focus:bg-white";
 
   return (
-    <tr className="group border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+    <tr className="group border-b border-slate-100 align-top last:border-0 hover:bg-slate-50/60">
       <td className="px-2 py-1">
         <input type="date" className={cell} value={activity.date}
           onChange={(e) => e.target.value && onUpdate(activity.id, { date: e.target.value })} />
@@ -348,10 +381,15 @@ function ActivityRow({ activity, project, projects, onUpdate, onDelete, onCreate
         </div>
       </td>
       <td className="px-2 py-1">
-        <input className={cell} value={description}
+        <textarea rows={1} className={`${cell} field-sizing-content min-h-[34px] resize-none`} value={description}
           onChange={(e) => setDescription(e.target.value)}
           onBlur={() => description !== activity.description && onUpdate(activity.id, { description })}
-          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }
+          }} />
       </td>
       <td className="px-2 py-1">
         <input type="number" min="0" step="0.25" className={`${cell} text-right`} value={hours}
@@ -363,7 +401,7 @@ function ActivityRow({ activity, project, projects, onUpdate, onDelete, onCreate
           }}
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
       </td>
-      <td className="px-3 py-1 text-right text-slate-600">
+      <td className="px-3 py-2.5 text-right text-slate-600">
         {project ? formatMoney(activity.hours * project.hourly_rate, project.currency) : "—"}
       </td>
       <td className="px-2 py-1 text-center">

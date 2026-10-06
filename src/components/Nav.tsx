@@ -10,7 +10,7 @@ export async function Nav() {
 
   return (
     <header className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-7xl items-center gap-6 px-4 py-3">
+      <div className="mx-auto flex max-w-[1600px] items-center gap-6 px-4 py-3">
         <Link href="/actividades" className="font-semibold tracking-tight">
           My Planner Life
         </Link>
